@@ -24,3 +24,8 @@ j.json
 # 本地环境变量
 .env
 .env.local
+
+# 本机私有配置（内网代理地址、私有 compose 覆盖、笔记等）
+# 此目录下的任何内容都不会进入公开仓库
+local/
+docker-compose.override.yml

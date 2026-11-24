@@ -87,6 +87,13 @@
   </aside>
 
   <main class="main">
+    <div class="topbar">
+      <div class="topbar-title">控制台</div>
+      <button id="settingsBtn" class="btn btn-ghost" title="设置">
+        <span class="gear">⚙</span> 设置
+      </button>
+    </div>
+
     <div class="metrics">
       <div class="metric"><div class="metric-label">GPU 显存</div><div class="metric-value"><span id="vramUsed">—</span><span class="metric-total"> / <span id="vramTotal">—</span> G</span></div><div class="bar"><i id="vramBar"></i></div></div>
       <div class="metric"><div class="metric-label">系统内存</div><div class="metric-value"><span id="ramUsed">—</span><span class="metric-total"> / <span id="ramTotal">—</span> G</span></div><div class="bar"><i id="ramBar" class="teal"></i></div></div>
@@ -198,6 +205,45 @@
   </div>
 </div>
 
-<script src="/app.js?v=2"></script>
+<div id="settingsModal" class="modal hidden">
+  <div class="modal-body modal-wide">
+    <header class="card-head">
+      <span>设置</span>
+      <button class="btn btn-tiny" data-close-settings>关闭</button>
+    </header>
+
+    <div class="settings-section">
+      <div class="settings-title">网络代理</div>
+      <p class="hint">
+        授权、唤醒实例、下载模型都需要访问 Google 与 HuggingFace。
+        若服务器无法直连，请在此配置代理。<b>保存后立即生效，无需重建容器。</b>
+      </p>
+
+      <label class="field-label mt">代理地址</label>
+      <input id="proxyUrlInput" class="input mono" placeholder="http://192.168.31.124:20171" />
+      <div class="hint">支持 http / https / socks5（socks5 需 socks5h:// 前缀以走远程 DNS）。留空表示直连。</div>
+
+      <label class="field-label mt">不走代理的地址（NO_PROXY）</label>
+      <input id="noProxyInput" class="input mono" placeholder="localhost,127.0.0.1,192.168.0.0/16" />
+      <div class="hint">内网地址建议直连，避免云端回传流量被代理绕远路。</div>
+
+      <div class="row gap mt">
+        <button id="testProxyBtn" class="btn btn-ghost">测试连接</button>
+        <button id="saveSettingsBtn" class="btn btn-primary">保存设置</button>
+        <button id="clearProxyBtn" class="btn btn-ghost">清空代理</button>
+      </div>
+      <div id="proxyTestResult" class="test-result"></div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-title">当前状态</div>
+      <div class="kv"><span>已保存代理</span><b id="savedProxyState">未配置</b></div>
+      <div class="kv"><span>数据目录</span><b>/data（容器重建保留）</b></div>
+      <div class="hint">设置保存在挂载卷，容器重建后仍然有效。</div>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js?v=3"></script>
 </body>
 </html>

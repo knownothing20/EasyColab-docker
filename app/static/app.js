@@ -161,6 +161,9 @@ async function loadState() {
     $("keepaliveToggle").checked = !!(st.keepalive && st.keepalive.running);
     renderLog(st.wake && st.wake.lines ? st.wake.lines : []);
     if (st.wake && st.wake.running) setPill($("connBadge"), "部署中", "busy");
+    state.proxyUrl = st.proxyUrl || "";
+    state.noProxy = st.noProxy || "";
+    updateSavedProxyLabel();
   } catch (e) {
     toast("读取状态失败: " + e.message);
   }
@@ -519,6 +522,91 @@ function openAuthModal() {
   $("authModal").classList.remove("hidden");
 }
 
+// ---------------------------------------------------------------------------
+// 设置：代理配置（保存后立即生效，无需重建容器）
+// ---------------------------------------------------------------------------
+function updateSavedProxyLabel() {
+  const el = $("savedProxyState");
+  if (!el) return;
+  el.textContent = state.proxyUrl ? state.proxyUrl : "未配置（直连）";
+}
+
+function openSettingsModal() {
+  $("proxyUrlInput").value = state.proxyUrl || "";
+  $("noProxyInput").value = state.noProxy || "";
+  updateSavedProxyLabel();
+  const r = $("proxyTestResult");
+  r.className = "test-result";
+  r.textContent = "";
+  $("settingsModal").classList.remove("hidden");
+}
+
+function showProxyResult(kind, text) {
+  const r = $("proxyTestResult");
+  r.className = "test-result show " + kind;
+  r.textContent = text;
+}
+
+async function testProxy() {
+  const proxy = $("proxyUrlInput").value.trim();
+  const btn = $("testProxyBtn");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "测试中…";
+  showProxyResult("busy", proxy ? `正在通过 ${proxy} 访问 Google…` : "正在直连 Google…");
+  try {
+    const d = await api("/api/settings/test_proxy", {
+      method: "POST",
+      body: JSON.stringify({ proxy_url: proxy }),
+      timeout: 20000,
+    });
+    if (d.reachable) {
+      showProxyResult("ok", d.detail + (proxy ? "" : "（当前为直连，未使用代理）"));
+    } else {
+      showProxyResult("err", d.detail || "连接失败");
+    }
+  } catch (e) {
+    showProxyResult("err", "测试失败: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+async function saveSettings() {
+  const proxy = $("proxyUrlInput").value.trim();
+  const noProxy = $("noProxyInput").value.trim();
+  if (proxy && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(proxy)) {
+    showProxyResult("err", "代理地址格式不对，需以 http:// 或 socks5h:// 开头");
+    return;
+  }
+  const btn = $("saveSettingsBtn");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "保存中…";
+  try {
+    await api("/api/settings", {
+      method: "POST",
+      body: JSON.stringify({ proxy_url: proxy, no_proxy: noProxy }),
+    });
+    state.proxyUrl = proxy;
+    state.noProxy = noProxy;
+    updateSavedProxyLabel();
+    toast("设置已保存，立即生效");
+    showProxyResult("ok", "已保存。新的代理配置已对所有后续请求生效，无需重启。");
+  } catch (e) {
+    showProxyResult("err", "保存失败: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+async function clearProxy() {
+  $("proxyUrlInput").value = "";
+  await saveSettings();
+}
+
 async function genAuthUrl() {
   try {
     const d = await api("/api/auth/url", { method: "POST", body: JSON.stringify({}) });
@@ -646,6 +734,18 @@ function bind() {
   });
   $("authModal").addEventListener("click", (e) => {
     if (e.target === $("authModal")) $("authModal").classList.add("hidden");
+  });
+
+  // 设置页
+  $("settingsBtn").onclick = openSettingsModal;
+  $("testProxyBtn").onclick = testProxy;
+  $("saveSettingsBtn").onclick = saveSettings;
+  $("clearProxyBtn").onclick = clearProxy;
+  document.querySelectorAll("[data-close-settings]").forEach((b) => {
+    b.onclick = () => $("settingsModal").classList.add("hidden");
+  });
+  $("settingsModal").addEventListener("click", (e) => {
+    if (e.target === $("settingsModal")) $("settingsModal").classList.add("hidden");
   });
 }
 

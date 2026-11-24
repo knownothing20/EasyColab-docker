@@ -54,6 +54,9 @@ def _default_settings() -> Dict[str, Any]:
         "idle_minutes": 30,
         "keepalive": False,
         "theme": "light",
+        # 代理：留空表示直连。网页上可改，保存后立即生效，无需重建容器
+        "proxy_url": "",
+        "no_proxy": "localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12",
     }
 
 
@@ -97,6 +100,21 @@ def _bridge_env() -> Dict[str, str]:
     env.setdefault("HOME", str(DATA_DIR))
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("PYTHONIOENCODING", "utf-8")
+    # 网页上配置的代理优先于容器环境变量；留空则回退到容器环境变量
+    cfg = load_settings()
+    proxy = str(cfg.get("proxy_url") or "").strip()
+    no_proxy = str(cfg.get("no_proxy") or "").strip()
+    if proxy:
+        env["HTTP_PROXY"] = proxy
+        env["HTTPS_PROXY"] = proxy
+        env["http_proxy"] = proxy
+        env["https_proxy"] = proxy
+    else:
+        for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            env.pop(k, None)
+    if no_proxy:
+        env["NO_PROXY"] = no_proxy
+        env["no_proxy"] = no_proxy
     return env
 
 
@@ -244,8 +262,17 @@ def _session() -> requests.Session:
     sess = getattr(_LOCAL, "sess", None)
     if sess is None:
         sess = requests.Session()
-        sess.trust_env = True
+        sess.trust_env = False
         _LOCAL.sess = sess
+    # 每次调用前同步代理，保证网页上改完立即生效
+    cfg = load_settings()
+    proxy = str(cfg.get("proxy_url") or "").strip()
+    if proxy:
+        sess.proxies = {"http": proxy, "https": proxy}
+    else:
+        # 未配置时回退到容器环境变量（若有）
+        env_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+        sess.proxies = {"http": env_proxy, "https": env_proxy} if env_proxy else {}
     return sess
 
 
@@ -310,12 +337,14 @@ def api_state() -> Dict[str, Any]:
         "keepalive": KEEPALIVE.snapshot(),
         "bridgeOk": BRIDGE.exists(),
         "repoDir": str(REPO_DIR),
+        "proxyUrl": cfg.get("proxy_url") or "",
+        "noProxy": cfg.get("no_proxy") or "",
     }
 
 
 @app.post("/api/settings")
 def api_settings(patch: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
-    allowed = {k: v for k, v in patch.items() if k in {"server_url", "gpu", "idle_minutes", "theme"}}
+    allowed = {k: v for k, v in patch.items() if k in {"server_url", "gpu", "idle_minutes", "theme", "proxy_url", "no_proxy"}}
     if "admin_password" in patch and PASSWORD_RE.fullmatch(str(patch["admin_password"])):
         allowed["admin_password"] = str(patch["admin_password"])
     cfg = save_settings(allowed)
@@ -341,12 +370,44 @@ def api_auth_code(body: Dict[str, str] = Body(...)) -> Dict[str, Any]:
         detail = res.get("stderr") or res.get("stdout") or res.get("error") or "授权失败"
         if "timed out" in str(detail).lower():
             detail = (
-                "容器访问 Google OAuth 服务超时。这通常是容器未配置代理导致："
-                "请在 docker-compose.yml 的 environment 里设置 HTTPS_PROXY，"
-                "指向一台可访问 Google 的代理后重建容器"
+                "访问 Google OAuth 服务超时。请打开右上角「设置」，"
+                "在「网络代理」里填入可用的代理地址（例如 http://192.168.x.x:7890），"
+                "保存后点「测试连接」确认能访问 Google，再重新提交授权码"
             )
         raise HTTPException(status_code=400, detail=detail)
     return {"ok": True, "detail": res.get("stdout", "")[-800:]}
+
+
+@app.post("/api/settings/test_proxy")
+def api_test_proxy(body: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
+    """用提交的草稿代理测试连通性，不影响已保存的配置。"""
+    proxy = str(body.get("proxy_url") or "").strip()
+    target = str(body.get("target") or "https://oauth2.googleapis.com/").strip()
+    if not target.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="测试地址必须是 http/https URL")
+
+    proxies = {"http": proxy, "https": proxy} if proxy else {}
+    sess = requests.Session()
+    sess.trust_env = False
+    started = time.time()
+    try:
+        resp = sess.get(target, proxies=proxies, timeout=12, verify=False)
+        elapsed = round(time.time() - started, 2)
+        return {
+            "ok": True,
+            "reachable": True,
+            "status": resp.status_code,
+            "elapsed": elapsed,
+            "detail": f"连接成功，HTTP {resp.status_code}，耗时 {elapsed}s",
+        }
+    except requests.exceptions.ProxyError as exc:
+        return {"ok": False, "reachable": False, "detail": f"代理连接失败，请检查代理地址与端口: {str(exc)[:200]}"}
+    except requests.exceptions.ConnectTimeout:
+        return {"ok": False, "reachable": False, "detail": "连接超时（12s）。代理不可用或目标不可达"}
+    except requests.exceptions.SSLError as exc:
+        return {"ok": False, "reachable": False, "detail": f"TLS 握手失败: {str(exc)[:200]}"}
+    except requests.exceptions.RequestException as exc:
+        return {"ok": False, "reachable": False, "detail": f"请求失败: {str(exc)[:200]}"}
 
 
 @app.post("/api/auth/logout")
