@@ -77,7 +77,12 @@
       <div class="kv"><span>执行队列</span><b id="comfyQueue">0 · 0</b></div>
       <div class="kv"><span>云盘挂载</span><b id="driveState">未挂载</b></div>
       <div class="kv"><span>云盘容量</span><b id="driveUsage">—</b></div>
+      <div class="kv"><span>实例可用磁盘</span><b id="driveLocalDisk">—</b></div>
       <div class="hint" id="drivePathHint">模型与插件当前只存在实例临时磁盘，实例回收即丢失。</div>
+      <div class="row gap">
+        <button id="driveMountBtn" class="btn btn-ghost grow">挂载云盘</button>
+        <button id="driveWhyBtn" class="btn btn-ghost">为什么</button>
+      </div>
       <div class="row gap mt">
         <button id="comfyStartBtn" class="btn btn-warn grow">启动画布</button>
         <button id="comfyOpenBtn" class="btn btn-ghost">打开</button>
@@ -224,6 +229,50 @@
   </div>
 </div>
 
+<div id="driveWhyModal" class="modal hidden">
+  <div class="modal-body modal-wide">
+    <header class="card-head">
+      <span>云盘为什么挂不上</span>
+      <button class="btn btn-tiny" data-close-drive-why>关闭</button>
+    </header>
+
+    <p class="hint">
+      云盘不是点个按钮就能挂的。Google 只允许在 <b>Colab 网页里点「装载 Google 云端硬盘」</b>授权，
+      这条链路走的是浏览器的 Google 登录态，命令行和 API 都调不到。
+      本程序完全靠 API 拉实例，没有浏览器登录态，所以自动挂载这条路径注定失败。
+    </p>
+
+    <div class="settings-section">
+      <div class="settings-title">当前实际卡在哪一环</div>
+      <div class="kv"><span>原生挂载 <code>/content/drive/MyDrive</code></span><b id="whyNative">检测中…</b></div>
+      <div class="kv"><span>rclone 备用通道</span><b id="whyRclone">检测中…</b></div>
+      <div class="kv"><span>可用存储</span><b id="whyDisk">—</b></div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-title">三条可选路（按省事程度排序）</div>
+      <p class="hint">
+        <b>1. 接受本地存储（什么都不用做）</b><br />
+        模型与作品存在实例临时盘（T4 约 112GB）。实例活着期间完全够用，
+        下载的权重、生成的作品都在。代价是<b>实例被回收后全部丢失</b>，下次要重新下载。
+      </p>
+      <p class="hint mt">
+        <b>2. 用完手动下载作品到本地</b><br />
+        生成的作品在「生成结果」区可以直接下载到你这台电脑，不受实例回收影响。
+        权重不用管，重新下载即可。
+      </p>
+      <p class="hint mt">
+        <b>3. 自建 Google Cloud OAuth Client（能真正挂上）</b><br />
+        用自己的 Client ID + 开启 Drive API 配额项目，程序会自动走 rclone 通道挂载云盘。
+        需要你在 Google Cloud Console 建一个项目，约 10 分钟，还要开结算账号。
+        这个方案的复杂度已经超过「顺手用一下」的范畴，需要的话我可以单独带你做。
+      </p>
+    </div>
+
+    <div class="hint" id="driveWhyRaw"></div>
+  </div>
+</div>
+
 <div id="settingsModal" class="modal hidden">
   <div class="modal-body modal-wide">
     <header class="card-head">
@@ -263,6 +312,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=8"></script>
+<script src="/app.js?v=10"></script>
 </body>
 </html>

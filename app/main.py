@@ -720,6 +720,65 @@ def api_stop_all() -> Dict[str, Any]:
 
 
 # ---- cloud proxy (1:1 mirrors the upstream /minimax_api/* contract) --------
+@app.get("/api/drive/diagnose")
+def api_drive_diagnose() -> Dict[str, Any]:
+    """解释云盘为什么没挂上，并给出此刻可行的替代方案。
+
+    结论：Colab 的 Google Drive 原生挂载必须由用户在 Colab 网页里点击授权，
+    走的是浏览器 Google 登录态；本程序只通过 API 操作实例，没有登录态，
+    所以自动挂载必然失败。rclone 备用通道要求用户自建 OAuth Client 且
+    开通 Drive API 配额项目，当前 token 用的是 colab-cli 的公共 ADC Client
+    (764086051850-*)，会被 Google 直接 403 SERVICE_DISABLED。
+    这里不猜，直接把云端实际字段读出来告诉前端卡在哪。
+    """
+    out: Dict[str, Any] = {
+        "ok": True,
+        "reachable": False,
+        "nativeMounted": False,
+        "rcloneReady": False,
+        "driveTotalGb": 0.0,
+        "diskFreeGb": 0.0,
+        "diskTotalGb": 0.0,
+        "storagePath": "",
+        "reason": "",
+    }
+    try:
+        d = _cloud_call("GET", "/minimax_api/status", timeout=30)
+    except HTTPException as exc:
+        out["reason"] = str(exc.detail)
+        return out
+    if not isinstance(d, dict):
+        out["reason"] = "云端返回格式异常"
+        return out
+
+    out["reachable"] = True
+    total = float(d.get("drive_total_gb") or 0)
+    out["nativeMounted"] = total > 0
+    out["driveTotalGb"] = total
+    out["diskFreeGb"] = float(d.get("disk_free_gb") or 0)
+    out["diskTotalGb"] = float(d.get("disk_total_gb") or 0)
+    out["storagePath"] = str(d.get("model_storage_path") or "")
+
+    persisted = bool(d.get("drive_persisted"))
+    comfy = d.get("comfyui") or {}
+    out["comfyPersisted"] = bool(comfy.get("drive_persisted"))
+
+    # _has_rclone_drive_remote() 的结果只体现在 drive_persisted 上：
+    # 挂载成功或 rclone 可用都会让它为 true，而容量读数只有真挂载才非零。
+    out["rcloneReady"] = bool(persisted and total == 0)
+    if not persisted:
+        out["reason"] = (
+            "云盘既没有原生挂载，也没有可用的 rclone 通道。"
+            "当前 token 使用 colab-cli 公共 ADC Client（无 quota_project），"
+            "Google 会拒绝 Drive API 调用，因此备用通道也被自动跳过。"
+        )
+    elif total == 0:
+        out["reason"] = "检测到 rclone 通道可用，但云盘容量读数为 0，挂载可能只完成了一半。"
+    else:
+        out["reason"] = "云盘已正常挂载。"
+    return out
+
+
 @app.get("/api/cloud/status")
 def api_cloud_status(model_id: Optional[str] = None) -> Any:
     q = f"?model_id={model_id}" if model_id else ""

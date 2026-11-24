@@ -207,6 +207,35 @@ function renderKeepalive(k) {
   hint.style.color = "var(--amber)";
 }
 
+async function doMountDrive() {
+  const btn = $("driveMountBtn");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "挂载中…";
+  try {
+    // 云端没有「挂载」接口，只有检测逻辑：它发现 /content/drive/MyDrive 已挂载
+    // 就直接用，没挂上也不会自己挂。所以这里触发一次状态刷新 + 诊断，
+    // 把真实结论告诉用户，而不是假装点成功了。
+    await refreshStatus();
+    const d = await api("/api/drive/diagnose", { timeout: 35000 });
+    if (d.nativeMounted) {
+      toast("云盘已挂载 " + fmt(d.driveTotalGb, 1) + " GB");
+    } else if (d.rcloneReady) {
+      toast("rclone 通道可用，云盘同步已启用");
+    } else {
+      // 这是真实结果：挂不上。直接给出原因，不要含糊其辞。
+      toast("挂载失败：云端不允许 API 挂载云盘，点「为什么」看原因");
+      openDriveWhyModal();
+    }
+  } catch (e) {
+    toast("挂载检查失败: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+    await refreshStatus();
+  }
+}
+
 function renderLog(lines) {
   const box = $("logBox");
   const merged = Array.isArray(lines) ? lines.slice(-260) : [];
@@ -337,6 +366,8 @@ function clearCloudStatus() {
   $("driveState").textContent = "—";
   $("driveState").style.color = "";
   $("driveUsage").textContent = "—";
+  const ld = $("driveLocalDisk");
+  if (ld) { ld.textContent = "—"; ld.style.color = ""; }
 }
 
 function applyStatus(d) {
@@ -395,6 +426,21 @@ function applyDriveStatus(d, comfy) {
   const stateEl = $("driveState");
   const usageEl = $("driveUsage");
   const hintEl = $("drivePathHint");
+  const localDiskEl = $("driveLocalDisk");
+
+  // 云盘没挂载不代表没空间可放模型：实例本身的临时磁盘通常有 100GB 以上。
+  // 之前只显示「未挂载」，用户完全看不到自己其实有 112GB 可用。
+  const dFree = Number(d.disk_free_gb || 0);
+  const dTotal = Number(d.disk_total_gb || 0);
+  if (localDiskEl) {
+    if (dTotal > 0) {
+      localDiskEl.textContent = fmt(dFree, 1) + " / " + fmt(dTotal, 1) + " GB 可用";
+      localDiskEl.style.color = dFree > 10 ? "var(--green)" : "var(--amber)";
+    } else {
+      localDiskEl.textContent = "—";
+      localDiskEl.style.color = "";
+    }
+  }
 
   if (mounted) {
     stateEl.textContent = persisted ? "已挂载并启用" : "已挂载（未用于持久化）";
@@ -408,7 +454,11 @@ function applyDriveStatus(d, comfy) {
 
   if (hintEl) {
     if (!mounted) {
-      hintEl.textContent = "云盘未挂载：模型与插件只存在实例临时磁盘，实例回收即丢失。";
+      // 本地盘够大时不要用「会丢失」吓人，说清实际影响就行
+      const free = Number(d.disk_free_gb || 0);
+      hintEl.textContent = free > 10
+        ? `云盘未挂载，但实例本地盘还有 ${fmt(free, 1)} GB，模型和作品照常使用。实例回收后会清空，重新下载即可。`
+        : "云盘未挂载：模型与插件只存在实例临时磁盘，实例回收即丢失。";
       hintEl.style.color = "var(--amber)";
     } else if (!persisted) {
       hintEl.textContent = "云盘已挂载，但 ComfyUI 仍使用实例本地存储。点「同步到云盘」切换到持久化目录。";
@@ -418,6 +468,55 @@ function applyDriveStatus(d, comfy) {
       hintEl.style.color = "var(--text-3)";
     }
   }
+
+  // 已经挂上了就不必再点「挂载云盘」
+  const mb = $("driveMountBtn");
+  if (mb) {
+    mb.disabled = mounted;
+    mb.textContent = mounted ? "已挂载" : "挂载云盘";
+  }
+}
+
+async function diagnoseDrive() {
+  const set = (id, text, color) => {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = color || "";
+  };
+  set("whyNative", "检测中…", "var(--text-3)");
+  set("whyRclone", "检测中…", "var(--text-3)");
+  set("whyDisk", "—");
+  $("driveWhyRaw").textContent = "";
+  try {
+    const d = await api("/api/drive/diagnose", { timeout: 35000 });
+    if (!d.reachable) {
+      set("whyNative", "云端不可达", "var(--amber)");
+      set("whyRclone", "无法判断", "var(--amber)");
+      $("driveWhyRaw").textContent = d.reason || "";
+      return;
+    }
+    set(
+      "whyNative",
+      d.nativeMounted ? `已挂载 ${fmt(d.driveTotalGb, 1)} GB` : "未挂载",
+      d.nativeMounted ? "var(--green)" : "var(--amber)"
+    );
+    set(
+      "whyRclone",
+      d.rcloneReady ? "可用" : "不可用（被 Google 拒绝）",
+      d.rcloneReady ? "var(--green)" : "var(--amber)"
+    );
+    set("whyDisk", `剩 ${fmt(d.diskFreeGb, 1)} / ${fmt(d.diskTotalGb, 1)} GB`);
+    $("driveWhyRaw").textContent = d.reason || "";
+  } catch (e) {
+    set("whyNative", "检测失败", "var(--amber)");
+    $("driveWhyRaw").textContent = e.message;
+  }
+}
+
+function openDriveWhyModal() {
+  $("driveWhyModal").classList.remove("hidden");
+  diagnoseDrive();
 }
 
 function syncModelOptions(d) {
@@ -902,6 +1001,14 @@ function bind() {
   $("comfyOpenBtn").onclick = () => doComfy("open");
   $("comfyFreeBtn").onclick = () => doComfy("free");
   $("comfySyncBtn").onclick = () => doComfy("sync");
+  $("driveMountBtn").onclick = doMountDrive;
+  $("driveWhyBtn").onclick = openDriveWhyModal;
+  document.querySelectorAll("[data-close-drive-why]").forEach((b) => {
+    b.onclick = () => $("driveWhyModal").classList.add("hidden");
+  });
+  $("driveWhyModal").addEventListener("click", (e) => {
+    if (e.target === $("driveWhyModal")) $("driveWhyModal").classList.add("hidden");
+  });
   $("downloadBtn").onclick = doDownload;
   $("loadBtn").onclick = doLoad;
   $("unloadBtn").onclick = doUnload;
