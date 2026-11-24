@@ -66,6 +66,8 @@
         <input type="checkbox" id="keepaliveToggle" />
         <span>保活守护（防 20 分钟强杀）</span>
       </label>
+      <div class="kv"><span>保活状态</span><b id="keepaliveState">未启用</b></div>
+      <div class="hint" id="keepaliveHint">开启后每 25 秒在长连接上打脉冲，防止实例被判定为空闲。</div>
       <button id="releaseBtn" class="btn btn-danger block mt">释放全部实例</button>
     </section>
 
@@ -261,6 +263,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=7"></script>
+<script src="/app.js?v=8"></script>
 </body>
 </html>

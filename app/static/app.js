@@ -167,6 +167,7 @@ async function loadState({ quiet = false } = {}) {
       setPill($("connBadge"), "未启动", "");
     }
     $("keepaliveToggle").checked = !!(st.keepalive && st.keepalive.running);
+    renderKeepalive(st.keepalive);
     renderLog(st.wake && st.wake.lines ? st.wake.lines : []);
     if (st.wake && st.wake.running) setPill($("connBadge"), "部署中", "busy");
     state.proxyUrl = st.proxyUrl || "";
@@ -178,6 +179,32 @@ async function loadState({ quiet = false } = {}) {
   } catch (e) {
     if (!quiet) toast("读取状态失败: " + e.message);
   }
+}
+
+function renderKeepalive(k) {
+  const el = $("keepaliveState");
+  const hint = $("keepaliveHint");
+  if (!el) return;
+  if (!k || k.state === "idle") {
+    el.textContent = "未启用";
+    el.style.color = "var(--text-3)";
+    hint.textContent = "开启后每 25 秒在长连接上打脉冲，防止实例被判定为空闲。";
+    hint.style.color = "var(--text-3)";
+    return;
+  }
+  if (k.running) {
+    const pulse = (k.lines || []).filter((l) => l.includes("keepalive")).length;
+    el.textContent = "守护中" + (pulse ? `（已心跳 ${pulse} 次）` : "");
+    el.style.color = "var(--green)";
+    hint.textContent = "保活进程在运行，实例不会因空闲被回收。";
+    hint.style.color = "var(--text-3)";
+    return;
+  }
+  // 开关打开但进程不在：这才是真正需要报警的状态
+  el.textContent = "已退出";
+  el.style.color = "var(--amber)";
+  hint.textContent = k.error || "保活进程已退出，看护会自动重启。若持续退出请查看运行日志。";
+  hint.style.color = "var(--amber)";
 }
 
 function renderLog(lines) {
@@ -612,9 +639,14 @@ async function doReleaseAll() {
 
 async function toggleKeepalive() {
   const on = $("keepaliveToggle").checked;
+  const btnLabel = on ? "正在启动保活…" : "";
   try {
-    await api("/api/keepalive", { method: "POST", body: JSON.stringify({ on }) });
+    if (btnLabel) { $("keepaliveState").textContent = btnLabel; $("keepaliveState").style.color = "var(--text-3)"; }
+    const r = await api("/api/keepalive", { method: "POST", body: JSON.stringify({ on }) });
     toast(on ? "保活守护已启动" : "保活守护已停止");
+    renderKeepalive(r.keepalive);
+    // 保活刚拉起时通常还没心跳，稍后再对一次真实状态
+    if (on) setTimeout(loadState.bind(null, { quiet: true }), 4000);
     pollWake();
   } catch (e) {
     toast("保活操作失败: " + e.message);

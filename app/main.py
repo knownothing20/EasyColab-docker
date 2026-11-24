@@ -168,13 +168,15 @@ class BridgeJob:
 
     def snapshot(self) -> Dict[str, Any]:
         with self.lock:
+            alive = self.proc is not None and self.proc.poll() is None
             return {
                 "name": self.name,
                 "state": self.state,
                 "url": self.url,
                 "error": self.error,
-                "running": self.proc is not None and self.proc.poll() is None,
+                "running": alive,
                 "startedAt": self.started_at,
+                "pid": self.proc.pid if alive and self.proc else None,
                 "lines": list(self.lines)[-260:],
             }
 
@@ -189,8 +191,12 @@ class BridgeJob:
         self.error = ""
         self.state = "starting"
         self.started_at = time.time()
+        # stdin 保留为可写管道且永不关闭：上游 keepalive_daemon 一旦读到 EOF
+        # 会立刻 stop_event.set() 并退出（原本是给桌面客户端关闭时用的信号）。
+        # 容器的 stdin 是 /dev/null，直接给就会秒退，日志只留一行 code=0。
         self.proc = subprocess.Popen(
             [sys.executable, "-u", str(BRIDGE), *args],
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -235,6 +241,18 @@ class BridgeJob:
                 self.state = "ready"
                 save_settings({"server_url": self.url})
                 self.log("隧道已就绪: " + self.url)
+                # 新实例刚起来，保活进程如果早就在跑（例如容器启动时恢复的），
+                # 它内部要等满 480 秒才重新同步会话列表，这段时间是保活盲区。
+                # 这里重启一次，让它立刻接管这个新实例。
+                if self.name == "wake":
+                    try:
+                        if _KEEPALIVE_GUARD["want"]:
+                            # start() 在旧进程还活着时会拒绝，必须先停再起
+                            KEEPALIVE.stop()
+                            KEEPALIVE.start(["keepalive_daemon"])
+                            KEEPALIVE.log("新实例就绪，保活已重启并接管该实例")
+                    except Exception as exc:  # noqa: BLE001
+                        KEEPALIVE.log(f"保活接管新实例失败: {exc}")
                 continue
             if line.startswith("WAKE_ERROR:"):
                 raw_err = line[len("WAKE_ERROR:"):].strip()
@@ -251,10 +269,81 @@ class BridgeJob:
         if self.state not in ("error",):
             self.state = "done" if rc == 0 else "error"
         self.log(f"进程退出 (code={rc})")
+        # keepalive 是常驻进程，退出即意味着保活失效（不是「任务完成」）。
+        # 记录真实原因，交由 API 层判断是否需要自动重启。
+        if self.name == "keepalive":
+            self.error = (
+                f"保活进程已退出 (code={rc})。"
+                + ("未产生任何输出，通常是上游 daemon 读到 stdin EOF 后主动退出。"
+                   if not any("keepalive" in ln for ln in list(self.lines))
+                   else "请检查日志中的 keepalive 状态行。")
+            )
+            self.state = "error"
 
 
 WAKE = BridgeJob("wake")
 KEEPALIVE = BridgeJob("keepalive")
+
+
+# ---------------------------------------------------------------------------
+# 保活看护
+#
+# keepalive_daemon 是常驻进程，不是一次性任务。上游版本会在 stdin EOF、代理
+# token 刷新失败等情况下自行退出，此时如果不重启，网页上的开关看起来还是
+# 打开的（settings.keepalive=true），实际早就不保活了 —— 用户看到的现象就是
+# 「点了保活，用一会儿就断」。
+# ---------------------------------------------------------------------------
+_KEEPALIVE_GUARD_LOCK = threading.Lock()
+_KEEPALIVE_GUARD: Dict[str, Any] = {"thread": None, "want": False, "restarts": 0}
+
+
+def _keepalive_alive() -> bool:
+    proc = KEEPALIVE.proc
+    return proc is not None and proc.poll() is None
+
+
+def _keepalive_guard_loop() -> None:
+    backoff = 5.0
+    while True:
+        time.sleep(5)
+        if not _KEEPALIVE_GUARD["want"]:
+            return
+        if _keepalive_alive():
+            # 存活满 30 秒就把退避重置，避免偶发抖动导致越等越久
+            if time.time() - KEEPALIVE.started_at > 30:
+                backoff = 5.0
+            continue
+        # 进程没了：退避后再拉起来，避免疯狂重启刷日志
+        time.sleep(min(backoff, 30))
+        if not _KEEPALIVE_GUARD["want"]:
+            return
+        try:
+            KEEPALIVE.start(["keepalive_daemon"])
+            _KEEPALIVE_GUARD["restarts"] += 1
+            KEEPALIVE.log(
+                f"看护已自动重启保活（第 {_KEEPALIVE_GUARD['restarts']} 次），"
+                f"上次退出原因见上方日志"
+            )
+            backoff = min(backoff * 2, 30)
+        except RuntimeError:
+            continue
+        except Exception as exc:  # noqa: BLE001
+            KEEPALIVE.log(f"看护重启保活失败: {exc}")
+
+
+def start_keepalive_guard() -> None:
+    with _KEEPALIVE_GUARD_LOCK:
+        _KEEPALIVE_GUARD["want"] = True
+        t = _KEEPALIVE_GUARD["thread"]
+        if t is None or not t.is_alive():
+            t = threading.Thread(target=_keepalive_guard_loop, daemon=True)
+            _KEEPALIVE_GUARD["thread"] = t
+            t.start()
+
+
+def stop_keepalive_guard() -> None:
+    with _KEEPALIVE_GUARD_LOCK:
+        _KEEPALIVE_GUARD["want"] = False
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +526,23 @@ def _cloud_call(method: str, path: str, body: Any = None, timeout: int = 40, str
 app = FastAPI(title="EasyColab Web Console", docs_url=None, redoc_url=None)
 
 
+@app.on_event("startup")
+def _resume_keepalive_on_boot() -> None:
+    """容器重启后按已保存的开关自动恢复保活。
+
+    否则重启一次容器，网页开关仍是「开」，实际却没有保活进程。
+    """
+    try:
+        cfg = load_settings()
+        if not cfg.get("keepalive"):
+            return
+        if not _keepalive_alive():
+            KEEPALIVE.start(["keepalive_daemon"])
+        start_keepalive_guard()
+    except Exception as exc:  # noqa: BLE001
+        KEEPALIVE.log(f"启动恢复保活失败: {exc}")
+
+
 @app.get("/api/state")
 def api_state() -> Dict[str, Any]:
     cfg = load_settings()
@@ -581,11 +687,23 @@ def api_keepalive(body: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
             KEEPALIVE.start(["keepalive_daemon"])
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"启动保活失败: {exc}") from exc
+        start_keepalive_guard()
         save_settings({"keepalive": True})
     else:
+        stop_keepalive_guard()
         KEEPALIVE.stop()
         save_settings({"keepalive": False})
     return {"ok": True, "keepalive": KEEPALIVE.snapshot()}
+
+
+@app.get("/api/keepalive")
+def api_keepalive_status() -> Dict[str, Any]:
+    snap = KEEPALIVE.snapshot()
+    snap["wanted"] = bool(_KEEPALIVE_GUARD["want"])
+    snap["restarts"] = _KEEPALIVE_GUARD["restarts"]
+    return {"ok": True, "keepalive": snap}
 
 
 @app.get("/api/keepalive")
