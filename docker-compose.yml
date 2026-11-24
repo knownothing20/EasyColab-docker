@@ -24,6 +24,15 @@ services:
       EASYCOLAB_DATA_DIR: /data
       EASYCOLAB_REPO_DIR: /opt/easycolab
       EASYCOLAB_OUTPUT_DIR: /data/outputs
+      # 容器需要访问 accounts.google.com / oauth2.googleapis.com 完成授权。
+      # 若宿主机在国内、无法直连 Google，取消下面注释并改成你的代理地址。
+      # 注意：代理地址必须从容器内可达。容器访问宿主机请用宿主机 IP 或
+      # host.docker.internal（并开启 extra_hosts），不要用 127.0.0.1。
+      # HTTP_PROXY: http://192.168.1.10:7890
+      # HTTPS_PROXY: http://192.168.1.10:7890
+      # NO_PROXY: localhost,127.0.0.1,192.168.0.0/16
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8626/api/health',timeout=4).read()"]
       interval: 30s

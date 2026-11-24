@@ -336,9 +336,16 @@ def api_auth_code(body: Dict[str, str] = Body(...)) -> Dict[str, Any]:
     code = (body.get("code") or "").strip()
     if not code:
         raise HTTPException(status_code=400, detail="请粘贴授权码")
-    res = _run_bridge(["auth_code", code], timeout=180)
+    res = _run_bridge(["auth_code", code], timeout=45)
     if not res.get("ok"):
-        raise HTTPException(status_code=400, detail=res.get("stderr") or res.get("stdout") or "授权失败")
+        detail = res.get("stderr") or res.get("stdout") or res.get("error") or "授权失败"
+        if "timed out" in str(detail).lower():
+            detail = (
+                "容器访问 Google OAuth 服务超时。这通常是容器未配置代理导致："
+                "请在 docker-compose.yml 的 environment 里设置 HTTPS_PROXY，"
+                "指向一台可访问 Google 的代理后重建容器"
+            )
+        raise HTTPException(status_code=400, detail=detail)
     return {"ok": True, "detail": res.get("stdout", "")[-800:]}
 
 

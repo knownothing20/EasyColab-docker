@@ -63,10 +63,24 @@ function toast(msg, ms = 2200) {
 }
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
+  const { timeout = 20000, ...rest } = opts;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      signal: ctrl.signal,
+      ...rest,
+    });
+  } catch (e) {
+    clearTimeout(timer);
+    if (e.name === "AbortError") {
+      throw new Error(`请求超时 (${timeout / 1000}s)，后端无响应。通常是容器无法访问 Google，请检查代理设置`);
+    }
+    throw new Error("网络错误: " + e.message);
+  }
+  clearTimeout(timer);
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
@@ -532,13 +546,22 @@ async function submitAuthCode() {
   let code = $("authCodeInput").value.trim();
   code = code.replace(/^["'`\s]+|["'`\s]+$/g, "");
   if (!code) return toast("请粘贴授权码");
+  const btn = $("authCodeBtn");
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "提交中…";
+  $("authHint").textContent = "正在向 Google 交换令牌，最长等待 60 秒…";
   try {
-    await api("/api/auth/code", { method: "POST", body: JSON.stringify({ code }) });
+    const d = await api("/api/auth/code", { method: "POST", body: JSON.stringify({ code }), timeout: 65000 });
     $("authHint").textContent = "授权成功";
     toast("Google 账号绑定成功");
     setTimeout(() => $("authModal").classList.add("hidden"), 900);
   } catch (e) {
     $("authHint").textContent = "授权失败: " + e.message;
+    toast("授权失败: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
   }
 }
 
