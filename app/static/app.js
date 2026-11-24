@@ -509,6 +509,7 @@ async function genAuthUrl() {
   try {
     const d = await api("/api/auth/url", { method: "POST", body: JSON.stringify({}) });
     const box = $("authUrlBox");
+    const actions = $("authUrlActions");
     box.classList.remove("hidden");
     box.innerHTML = "";
     const a = document.createElement("a");
@@ -517,13 +518,19 @@ async function genAuthUrl() {
     a.rel = "noopener";
     a.textContent = d.authUrl;
     box.appendChild(a);
+    actions.classList.remove("hidden");
+    $("openAuthUrlLink").href = d.authUrl;
+    $("copyAuthUrlBtn").onclick = () => copyText(d.authUrl, "授权链接");
+    $("authHint").textContent = "提示：优先点「在新标签打开」直接跳转；或点「复制链接」到浏览器地址栏粘贴。";
   } catch (e) {
     $("authHint").textContent = "生成失败: " + e.message;
   }
 }
 
 async function submitAuthCode() {
-  const code = $("authCodeInput").value.trim();
+  // 允许粘贴时被引号或多余空白包裹
+  let code = $("authCodeInput").value.trim();
+  code = code.replace(/^["'`\s]+|["'`\s]+$/g, "");
   if (!code) return toast("请粘贴授权码");
   try {
     await api("/api/auth/code", { method: "POST", body: JSON.stringify({ code }) });
@@ -537,18 +544,40 @@ async function submitAuthCode() {
 
 function copyText(text, label) {
   if (!text) return toast("没有可复制的内容");
-  navigator.clipboard.writeText(text).then(
-    () => toast((label || "内容") + "已复制"),
-    () => {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
-      toast((label || "内容") + "已复制");
-    }
-  );
+  const done = () => toast((label || "内容") + "已复制");
+  const fail = () => toast("复制失败，请手动选择文本");
+
+  // 老浏览器 / HTTP 页面：navigator.clipboard 不存在，先尝试 execCommand
+  if (!navigator.clipboard) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (_) {}
+    ta.remove();
+    return ok ? done() : fail();
+  }
+
+  // HTTPS / localhost：用 clipboard API
+  navigator.clipboard.writeText(text).then(done, () => {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (_) {}
+    ta.remove();
+    ok ? done() : fail();
+  });
 }
 
 function applyPreset() {

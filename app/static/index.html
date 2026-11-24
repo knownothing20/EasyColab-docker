@@ -185,6 +185,10 @@
     <p class="hint">1. 点击下方按钮生成授权链接，在你自己电脑的浏览器里打开并授权。</p>
     <button id="authUrlBtn" class="btn btn-primary block">生成授权链接</button>
     <div id="authUrlBox" class="url-box hidden"></div>
+    <div id="authUrlActions" class="row hidden" style="gap:6px;margin-top:6px">
+      <button id="copyAuthUrlBtn" class="btn btn-ghost">复制链接</button>
+      <a id="openAuthUrlLink" class="btn btn-ghost" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center">在新标签打开</a>
+    </div>
     <p class="hint mt">2. 授权后浏览器会显示一段授权码，粘贴到这里：</p>
     <div class="row">
       <input id="authCodeInput" class="input mono" placeholder="粘贴授权码" />
