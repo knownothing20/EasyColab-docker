@@ -237,9 +237,14 @@ class BridgeJob:
                 self.log("隧道已就绪: " + self.url)
                 continue
             if line.startswith("WAKE_ERROR:"):
-                self.error = line[len("WAKE_ERROR:"):].strip()
+                raw_err = line[len("WAKE_ERROR:"):].strip()
+                # 翻译为按真实原因给出建议的提示（上游文案是写死的通用建议）
+                self.error = _translate_wake_error(raw_err, load_settings().get("gpu") or "")
                 self.state = "error"
-                self.log("失败: " + self.error)
+                self.log("失败: " + raw_err)
+                if self.error != raw_err:
+                    for ln in self.error.splitlines():
+                        self.log(ln)
                 continue
             self.log(line)
         rc = proc.wait()
@@ -252,6 +257,85 @@ WAKE = BridgeJob("wake")
 KEEPALIVE = BridgeJob("keepalive")
 
 
+# ---------------------------------------------------------------------------
+# 错误提示翻译
+#
+# 上游 bridge 的错误文案是写死的通用建议，例如「拒绝分配 L4，建议切换为
+# A100 / L4 / T4」—— 建议里恰好包含刚失败的机型，会误导用户反复撞同一堵墙。
+# 这里按 HTTP 状态码与失败的机型重写为可操作的建议，不修改上游文件。
+# ---------------------------------------------------------------------------
+_GPU_DISPLAY = {
+    "T4": "T4 (16GB)",
+    "L4": "L4 (24GB)",
+    "A100": "A100 (80GB)",
+    "G4": "G4 (RTX PRO 6000 · 96GB)",
+    "H100": "H100 (80GB)",
+}
+# Colab 订阅等级与机型的对应关系
+_TIER_GPUS = [
+    ("免费版", "T4"),
+    ("Pro（约 $10/月）", "T4"),
+    ("Pro+（约 $50/月）", "L4 / A100"),
+    ("AI Ultra", "G4 / H100"),
+]
+
+
+def _translate_wake_error(raw: str, gpu: str = "") -> str:
+    if not raw:
+        return raw
+    text = raw.strip()
+    g = (gpu or "").upper()
+
+    # 从原始报错里提取实际失败的机型，避免依赖外部传参
+    m = re.search(r"分配\s+([A-Za-z0-9]+(?:\s*\([^)]*\))?)\s*\(HTTP\s*(\d+)\)", text)
+    failed_gpu = ""
+    if m:
+        failed_gpu = m.group(1).split("(")[0].strip().upper()
+    if not failed_gpu:
+        failed_gpu = g
+
+    def _gpu_hint(exclude: str = "") -> str:
+        rows = []
+        for tier, gpus in _TIER_GPUS:
+            names = [x.strip() for x in gpus.split("/")]
+            marks = []
+            for n in names:
+                marks.append(f"~~{n}~~(刚被拒)" if n == exclude else n)
+            rows.append(f"  · {tier}：{' / '.join(marks)}")
+        return "\n".join(rows)
+
+    if "HTTP 400" in text or "拒绝分配" in text:
+        return (
+            f"❌ Google 拒绝了 {failed_gpu or '该机型'} 的分配请求（HTTP 400 = 账号无权使用，重试无效）。\n"
+            f"这通常意味着你的订阅等级不包含此机型，而非临时缺货。\n"
+            f"各订阅等级可用机型：\n{_gpu_hint(failed_gpu)}\n"
+            f"👉 建议：在左侧改用你订阅等级内的机型。若你用的是普通 Pro，请直接选 T4。"
+        )
+
+    if "HTTP 503" in text or "库存不足" in text or "算力池" in text:
+        return (
+            f"⏳ {failed_gpu or '该机型'} 当前没有空闲机器（HTTP 503 = 临时缺货，可以重试）。\n"
+            f"这是 Google 侧的资源紧张，与你的配置无关，也不是程序故障。\n"
+            f"👉 建议：\n"
+            f"  · 等 5–15 分钟后重试，通常能抢到\n"
+            f"  · T4 最拥挤（免费用户也在抢），深夜/清晨成功率明显更高\n"
+            f"  · 避开美西工作时段（北京时间 0:00–8:00 左右最挤）"
+        )
+
+    if "HTTP 412" in text or "并发" in text:
+        return (
+            "🚫 账号并发实例数已达上限（HTTP 412）。\n"
+            "👉 建议：先点左侧「释放全部实例」，或在 colab.research.google.com "
+            "检查是否有其他标签页占着实例，释放后再唤醒。"
+        )
+
+    if "timed out" in text.lower() or "timeout" in text.lower():
+        return (
+            "🌐 网络超时，未能连上 Google Colab。\n"
+            "👉 建议：打开右上角「设置」，确认代理可用（点「测试连接」）。"
+        )
+
+    return text
 # ---------------------------------------------------------------------------
 # Cloud proxy helpers (Colab-side app.py, HTTP Basic as user "easycolab")
 # ---------------------------------------------------------------------------
