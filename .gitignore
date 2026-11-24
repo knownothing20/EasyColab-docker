@@ -1,0 +1,26 @@
+# 运行时数据（授权 token、管理密码、生成产物）
+data/
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 构建与临时文件
+*.tgz
+*.log
+st.json
+j.json
+
+# 本地环境变量
+.env
+.env.local

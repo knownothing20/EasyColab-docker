@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EasyColab 控制台</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app" class="app">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">EC</div>
+      <div>
+        <div class="brand-name">EasyColab</div>
+        <div class="brand-sub">Colab 云端算力控制台</div>
+      </div>
+    </div>
+
+    <section class="card">
+      <header class="card-head">
+        <span>Colab 算力实例</span>
+        <span id="connBadge" class="pill">未启动</span>
+      </header>
+      <label class="field-label">服务地址</label>
+      <div class="row">
+        <input id="serverUrl" class="input mono" placeholder="https://xxxx.gradio.live" />
+        <button id="copyUrlBtn" class="btn btn-ghost" title="复制地址">复制</button>
+      </div>
+      <div class="row gap">
+        <select id="gpuSelect" class="input">
+          <option value="G4">G4 · PRO 6000</option>
+          <option value="H100">H100 · 80GB</option>
+          <option value="A100">A100 · 80GB</option>
+          <option value="L4">L4 · 24GB</option>
+          <option value="T4">T4 · 16GB</option>
+        </select>
+      </div>
+      <button id="wakeBtn" class="btn btn-primary block">唤醒实例并部署</button>
+      <button id="connectBtn" class="btn btn-ghost block">连接已有实例</button>
+      <button id="accountBtn" class="btn btn-ghost block">绑定 / 切换 Google 账号</button>
+    </section>
+
+    <section class="card">
+      <header class="card-head"><span>算力额度与自动休眠</span></header>
+      <div class="stat-big"><span id="cuBalance">—</span><span class="stat-unit">CU 余额</span></div>
+      <div class="kv"><span>消耗速率</span><b id="cuRate">— CU/h</b></div>
+      <div class="kv"><span>本次已用</span><b id="cuSession">— CU</b></div>
+      <div class="kv"><span>运行时长</span><b id="uptime">—</b></div>
+      <label class="field-label mt">闲置自动释放</label>
+      <select id="idleSelect" class="input">
+        <option value="15">15 分钟</option>
+        <option value="30" selected>30 分钟</option>
+        <option value="60">60 分钟</option>
+        <option value="0">关闭</option>
+      </select>
+      <div class="kv"><span>闲置倒计时</span><b id="idleLeft">—</b></div>
+      <label class="switch-row">
+        <input type="checkbox" id="keepaliveToggle" />
+        <span>保活守护（防 20 分钟强杀）</span>
+      </label>
+      <button id="releaseBtn" class="btn btn-danger block mt">释放全部实例</button>
+    </section>
+
+    <section class="card">
+      <header class="card-head"><span>ComfyUI 画布</span></header>
+      <div class="kv"><span>画布状态</span><b id="comfyState">未启动</b></div>
+      <div class="kv"><span>执行队列</span><b id="comfyQueue">0 · 0</b></div>
+      <div class="row gap mt">
+        <button id="comfyStartBtn" class="btn btn-warn grow">启动画布</button>
+        <button id="comfyOpenBtn" class="btn btn-ghost">打开</button>
+      </div>
+      <div class="row gap">
+        <button id="comfyFreeBtn" class="btn btn-ghost grow">清缓存显存</button>
+        <button id="comfySyncBtn" class="btn btn-ghost grow">同步云盘</button>
+      </div>
+    </section>
+
+    <section class="card card-log">
+      <header class="card-head">
+        <span>运行日志</span>
+        <button id="copyLogBtn" class="btn btn-tiny">复制</button>
+      </header>
+      <pre id="logBox" class="log"></pre>
+    </section>
+  </aside>
+
+  <main class="main">
+    <div class="metrics">
+      <div class="metric"><div class="metric-label">GPU 显存</div><div class="metric-value"><span id="vramUsed">—</span><span class="metric-total"> / <span id="vramTotal">—</span> G</span></div><div class="bar"><i id="vramBar"></i></div></div>
+      <div class="metric"><div class="metric-label">系统内存</div><div class="metric-value"><span id="ramUsed">—</span><span class="metric-total"> / <span id="ramTotal">—</span> G</span></div><div class="bar"><i id="ramBar" class="teal"></i></div></div>
+      <div class="metric"><div class="metric-label">实例磁盘</div><div class="metric-value"><span id="diskUsed">—</span><span class="metric-total"> / <span id="diskTotal">—</span> G</span></div><div class="bar"><i id="diskBar" class="amber"></i></div></div>
+      <div class="metric"><div class="metric-label">GPU 型号</div><div class="metric-model" id="gpuName">未连接</div></div>
+    </div>
+
+    <div class="grid-2">
+      <section class="card">
+        <header class="card-head"><span>模型与显存</span><button id="refreshStatusBtn" class="btn btn-tiny">刷新</button></header>
+        <label class="field-label">当前模型</label>
+        <select id="modelSelect" class="input"></select>
+        <div class="kv"><span>权重就绪</span><b id="weightsInfo">—</b></div>
+        <div class="kv"><span>显存常驻</span><b id="loadedModels">—</b></div>
+        <div class="row gap mt">
+          <button id="downloadBtn" class="btn btn-ghost grow">下载权重</button>
+          <button id="loadBtn" class="btn btn-primary grow">加载到显存</button>
+          <button id="unloadBtn" class="btn btn-ghost">卸载</button>
+        </div>
+        <div class="progress"><i id="taskProgress"></i></div>
+        <div class="hint" id="taskMessage">等待操作</div>
+      </section>
+
+      <section class="card">
+        <header class="card-head"><span>API 网关</span></header>
+        <div class="kv"><span>推理密钥</span><b id="apiKeyState">未配置</b></div>
+        <div class="kv"><span>请求计数</span><b id="apiReqCount">0</b></div>
+        <label class="field-label mt">密钥</label>
+        <div class="row">
+          <input id="apiKeyInput" class="input mono" placeholder="设置外部工具调用密钥" />
+          <button id="apiKeyBtn" class="btn btn-ghost">同步</button>
+        </div>
+        <div class="hint">OpenAI / Anthropic 兼容端点由云端网关提供，填入密钥即可给 Claude Code、Cursor 使用。</div>
+      </section>
+    </div>
+
+    <section class="card">
+      <header class="card-head">
+        <span>生成工作台</span>
+        <div class="tabs" id="modeTabs"></div>
+      </header>
+      <div class="grid-2">
+        <div>
+          <label class="field-label">提示词</label>
+          <textarea id="promptInput" class="input textarea" rows="4" placeholder="描述镜头、主体、光线与运镜…"></textarea>
+          <label class="field-label mt">反向提示词</label>
+          <input id="negInput" class="input" placeholder="可选，排除的内容" />
+          <label class="field-label mt">音效 / 配乐描述</label>
+          <input id="soundInput" class="input" placeholder="可选，32kHz 立体声描述" />
+          <label class="field-label mt">预设模板</label>
+          <select id="presetSelect" class="input"></select>
+        </div>
+        <div>
+          <label class="field-label">分辨率</label>
+          <select id="resSelect" class="input"></select>
+          <div class="field-grid mt">
+            <div>
+              <label class="field-label">时长</label>
+              <select id="durationSelect" class="input"></select>
+            </div>
+            <div>
+              <label class="field-label">采样步数</label>
+              <input id="stepsInput" class="input" type="number" min="1" max="100" value="35" />
+            </div>
+            <div>
+              <label class="field-label">随机种子</label>
+              <input id="seedInput" class="input" type="number" value="42" />
+            </div>
+            <div>
+              <label class="field-label">连续生成</label>
+              <input id="batchInput" class="input" type="number" min="1" max="8" value="1" />
+            </div>
+          </div>
+          <div class="row gap mt">
+            <button id="generateBtn" class="btn btn-primary grow">开始生成</button>
+            <button id="cancelBtn" class="btn btn-ghost">取消</button>
+          </div>
+          <div class="progress mt"><i id="genProgress"></i></div>
+          <div class="hint" id="genMessage">就绪</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <header class="card-head"><span>作品库</span><button id="refreshOutputsBtn" class="btn btn-tiny">刷新</button></header>
+      <div id="outputs" class="outputs"><div class="empty">暂无作品</div></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<div id="authModal" class="modal hidden">
+  <div class="modal-body">
+    <header class="card-head"><span>绑定 Google 账号</span><button class="btn btn-tiny" data-close>关闭</button></header>
+    <p class="hint">1. 点击下方按钮生成授权链接，在你自己电脑的浏览器里打开并授权。</p>
+    <button id="authUrlBtn" class="btn btn-primary block">生成授权链接</button>
+    <div id="authUrlBox" class="url-box hidden"></div>
+    <p class="hint mt">2. 授权后浏览器会显示一段授权码，粘贴到这里：</p>
+    <div class="row">
+      <input id="authCodeInput" class="input mono" placeholder="粘贴授权码" />
+      <button id="authCodeBtn" class="btn btn-primary">提交</button>
+    </div>
+    <div class="hint" id="authHint"></div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

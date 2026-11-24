@@ -1,0 +1,41 @@
+services:
+  easycolab-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: easycolab-web:local
+    container_name: easycolab-web
+    restart: unless-stopped
+    ports:
+      - "8626:8626"
+    volumes:
+      # 上游 easycolab 仓库，只读挂载（本项目依赖它的 colab_bridge.py 与 app.py）
+      - ../easycolab:/opt/easycolab:ro
+      # 凭证、配置与生成产物
+      - ./data:/data
+    environment:
+      TZ: Asia/Shanghai
+      # HOME 指向挂载卷，否则 OAuth token 落在 /root，容器重建后授权失效
+      HOME: /data
+      EASYCOLAB_DATA_DIR: /data
+      EASYCOLAB_REPO_DIR: /opt/easycolab
+      EASYCOLAB_OUTPUT_DIR: /data/outputs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8626/api/health',timeout=4).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default:
+    name: easycolab-net
+    ipam:
+      config:
+        # docker 默认地址池容易被多容器环境耗尽，显式指定一个空闲网段
+        - subnet: 172.32.250.0/24
