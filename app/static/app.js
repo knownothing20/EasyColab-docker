@@ -164,6 +164,9 @@ async function loadState() {
     state.proxyUrl = st.proxyUrl || "";
     state.noProxy = st.noProxy || "";
     updateSavedProxyLabel();
+    renderAccount(st);
+    if (st.cuBalance != null) $("cuBalance").textContent = fmt(st.cuBalance, 1);
+    if (st.cuRate != null) $("cuRate").textContent = fmt(st.cuRate, 1) + " CU/h";
   } catch (e) {
     toast("读取状态失败: " + e.message);
   }
@@ -522,6 +525,50 @@ function openAuthModal() {
   $("authModal").classList.remove("hidden");
 }
 
+// 渲染 Google 账号绑定状态
+function renderAccount(st) {
+  const email = st.email || (st.account && st.account.email) || "";
+  const logged = !!st.loggedIn;
+  const dot = $("acctDot");
+  const label = $("acctEmail");
+  const bindBtn = $("accountBtn");
+  const logoutBtn = $("logoutBtn");
+  if (!dot || !label) return;
+
+  if (logged && email) {
+    dot.classList.add("on");
+    label.classList.add("on");
+    label.textContent = email;
+    label.title = "已绑定 Google 账号";
+    bindBtn.textContent = "切换 Google 账号";
+    logoutBtn.classList.remove("hidden");
+  } else if (logged) {
+    dot.classList.add("on");
+    label.classList.add("on");
+    label.textContent = "已绑定（未取到邮箱）";
+    bindBtn.textContent = "切换 Google 账号";
+    logoutBtn.classList.remove("hidden");
+  } else {
+    dot.classList.remove("on");
+    label.classList.remove("on");
+    label.textContent = "未绑定 Google 账号";
+    label.title = "";
+    bindBtn.textContent = "绑定 Google 账号";
+    logoutBtn.classList.add("hidden");
+  }
+}
+
+async function doLogout() {
+  if (!confirm("确定解除绑定？已保存的 Google 授权 token 会被删除，需要重新授权才能使用。")) return;
+  try {
+    await api("/api/auth/logout", { method: "POST", body: "{}", timeout: 70000 });
+    toast("已解除绑定");
+    await loadState();
+  } catch (e) {
+    toast("解绑失败: " + e.message);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 设置：代理配置（保存后立即生效，无需重建容器）
 // ---------------------------------------------------------------------------
@@ -643,6 +690,7 @@ async function submitAuthCode() {
     const d = await api("/api/auth/code", { method: "POST", body: JSON.stringify({ code }), timeout: 65000 });
     $("authHint").textContent = "授权成功";
     toast("Google 账号绑定成功");
+    await loadState();
     setTimeout(() => $("authModal").classList.add("hidden"), 900);
   } catch (e) {
     $("authHint").textContent = "授权失败: " + e.message;
@@ -729,6 +777,7 @@ function bind() {
   };
   $("authUrlBtn").onclick = genAuthUrl;
   $("authCodeBtn").onclick = submitAuthCode;
+  $("logoutBtn").onclick = doLogout;
   document.querySelectorAll("[data-close]").forEach((b) => {
     b.onclick = () => $("authModal").classList.add("hidden");
   });

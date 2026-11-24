@@ -39,7 +39,13 @@
       </div>
       <button id="wakeBtn" class="btn btn-primary block">唤醒实例并部署</button>
       <button id="connectBtn" class="btn btn-ghost block">连接已有实例</button>
+
+      <div id="accountInfo" class="account-info">
+        <span class="acct-dot" id="acctDot"></span>
+        <span class="acct-email" id="acctEmail">未绑定 Google 账号</span>
+      </div>
       <button id="accountBtn" class="btn btn-ghost block">绑定 / 切换 Google 账号</button>
+      <button id="logoutBtn" class="btn btn-ghost block hidden">解除绑定</button>
     </section>
 
     <section class="card">
@@ -244,6 +250,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=3"></script>
+<script src="/app.js?v=4"></script>
 </body>
 </html>

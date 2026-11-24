@@ -322,12 +322,19 @@ app = FastAPI(title="EasyColab Web Console", docs_url=None, redoc_url=None)
 def api_state() -> Dict[str, Any]:
     cfg = load_settings()
     auth = _run_bridge(["auth_status"], timeout=90)
-    logged_in = bool((auth.get("data") or {}).get("logged_in"))
-    sessions = (auth.get("data") or {}).get("sessions") or []
+    data = auth.get("data") or {}
+    logged_in = bool(data.get("logged_in"))
+    sessions = data.get("sessions") or []
     return {
         "ok": True,
         "loggedIn": logged_in,
-        "account": (auth.get("data") or {}).get("account") or {},
+        # 上游 bridge 的 auth_status 返回 email / paid_balance / burn_rate_hourly，
+        # 并没有 account 这个嵌套对象，此前取错字段导致前端拿不到邮箱
+        "email": data.get("email") or "",
+        "cuBalance": data.get("paid_balance"),
+        "cuRate": data.get("burn_rate_hourly"),
+        "activeAssignments": data.get("active_assignments", 0),
+        "account": {"email": data.get("email") or ""},
         "sessions": sessions,
         "serverUrl": cfg.get("server_url") or "",
         "passwordConfigured": bool(PASSWORD_RE.fullmatch(str(cfg.get("admin_password") or ""))),

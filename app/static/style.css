@@ -188,8 +188,14 @@ select.input { cursor: pointer; }
 .modal-body.modal-wide { max-width: 560px; max-height: 86vh; overflow-y: auto; }
 .hidden { display: none !important; }
 
-/* 顶栏 */
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 4px; }
+/* 账号显示 */
+.account-info { display: flex; align-items: center; gap: 7px; padding: 8px 10px; margin-top: 8px; background: var(--surface-2); border-radius: 6px; }
+.acct-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }
+.acct-dot.on { background: var(--green); }
+.acct-email { font-size: 11.5px; color: var(--text-2); word-break: break-all; line-height: 1.4; }
+.acct-email.on { color: var(--text); font-weight: 500; }
+
+/* 顶栏 */.topbar { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 4px; }
 .topbar-title { font-size: 15px; font-weight: 500; color: var(--text); }
 #settingsBtn .gear { margin-right: 4px; font-size: 13px; }
 
