@@ -73,13 +73,16 @@
       <header class="card-head"><span>ComfyUI 画布</span></header>
       <div class="kv"><span>画布状态</span><b id="comfyState">未启动</b></div>
       <div class="kv"><span>执行队列</span><b id="comfyQueue">0 · 0</b></div>
+      <div class="kv"><span>云盘挂载</span><b id="driveState">未挂载</b></div>
+      <div class="kv"><span>云盘容量</span><b id="driveUsage">—</b></div>
+      <div class="hint" id="drivePathHint">模型与插件当前只存在实例临时磁盘，实例回收即丢失。</div>
       <div class="row gap mt">
         <button id="comfyStartBtn" class="btn btn-warn grow">启动画布</button>
         <button id="comfyOpenBtn" class="btn btn-ghost">打开</button>
       </div>
       <div class="row gap">
         <button id="comfyFreeBtn" class="btn btn-ghost grow">清缓存显存</button>
-        <button id="comfySyncBtn" class="btn btn-ghost grow">同步云盘</button>
+        <button id="comfySyncBtn" class="btn btn-ghost grow">同步到云盘</button>
       </div>
     </section>
 
@@ -98,6 +101,14 @@
       <button id="settingsBtn" class="btn btn-ghost" title="设置">
         <span class="gear">⚙</span> 设置
       </button>
+    </div>
+
+    <div id="offlineBanner" class="banner banner-warn hidden">
+      <div class="banner-main">
+        <b>云端实例已离线</b>
+        <span id="offlineReason">地址还在，但实例里的服务已经退出。</span>
+      </div>
+      <button id="offlineRewakeBtn" class="btn btn-primary">唤醒实例并部署</button>
     </div>
 
     <div class="metrics">
@@ -250,6 +261,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=5"></script>
+<script src="/app.js?v=7"></script>
 </body>
 </html>

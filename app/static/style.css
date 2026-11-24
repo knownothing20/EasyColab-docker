@@ -199,6 +199,15 @@ select.input { cursor: pointer; }
 .topbar-title { font-size: 15px; font-weight: 500; color: var(--text); }
 #settingsBtn .gear { margin-right: 4px; font-size: 13px; }
 
+/* 离线横幅：实例被回收 / 隧道失效时置顶提示，别让用户对着死页面猜 */
+.banner { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; margin-bottom: 10px; }
+.banner.hidden { display: none; }
+.banner-main { flex: 1; min-width: 0; font-size: 12px; line-height: 1.5; }
+.banner-main b { display: block; font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.banner-main span { opacity: .85; }
+.banner-warn { background: var(--amber-bg); border: 1px solid #FAC775; color: #854F0B; }
+.banner-warn .btn { flex: 0 0 auto; }
+
 /* 设置页 */
 .settings-section { padding: 12px 0; border-bottom: 1px solid var(--border); }
 .settings-section:last-child { border-bottom: none; padding-bottom: 4px; }

@@ -198,6 +198,7 @@ async function pollWake() {
       $("serverUrl").value = w.url;
       state.connected = true;
       setPill($("connBadge"), "已连接", "ok");
+      if (!w.running) hideOfflineBanner();
     }
     if (w.running) {
       setPill($("connBadge"), "部署中", "busy");
@@ -261,11 +262,13 @@ async function refreshStatus() {
     }
     applyStatus(d);
     setPill($("connBadge"), "已连接", "ok");
+    hideOfflineBanner();
   } catch (e) {
     // 地址存在但云端已经消失时，不能继续显示「已连接」和陈旧指标。
     state.connected = false;
     setPill($("connBadge"), "连接已失效", "bad");
     clearCloudStatus();
+    showOfflineBanner(e.message || "地址还在，但实例里的服务已经退出。");
   } finally {
     state.refreshInFlight = false;
   }
@@ -277,6 +280,18 @@ async function refreshConnectedData({ reloadAccount = false } = {}) {
     await Promise.all([loadModels(), refreshOutputs()]);
   }
   if (reloadAccount) await loadState({ quiet: true });
+}
+
+function showOfflineBanner(reason) {
+  const el = $("offlineBanner");
+  if (!el) return;
+  $("offlineReason").textContent = reason || "地址还在，但实例里的服务已经退出。";
+  el.classList.remove("hidden");
+}
+
+function hideOfflineBanner() {
+  const el = $("offlineBanner");
+  if (el) el.classList.add("hidden");
 }
 
 function clearCloudStatus() {
@@ -292,6 +307,9 @@ function clearCloudStatus() {
   $("comfyState").textContent = "未启动";
   $("comfyQueue").textContent = "0 运行 · 0 排队";
   $("comfyOpenBtn").disabled = true;
+  $("driveState").textContent = "—";
+  $("driveState").style.color = "";
+  $("driveUsage").textContent = "—";
 }
 
 function applyStatus(d) {
@@ -332,10 +350,47 @@ function applyStatus(d) {
   $("comfyQueue").textContent = (comfy.queue_running ?? 0) + " 运行 · " + (comfy.queue_pending ?? 0) + " 排队";
   $("comfyOpenBtn").disabled = !comfy.is_running || !comfy.public_url;
 
+  applyDriveStatus(d, comfy);
+
   if (d.console_lines && d.console_lines.length) renderLog(d.console_lines);
 
   syncModelOptions(d);
   if (Array.isArray(d.custom_models)) state.models = d.custom_models;
+}
+
+function applyDriveStatus(d, comfy) {
+  const total = Number(d.drive_total_gb || 0);
+  const used = Number(d.drive_used_gb || 0);
+  const free = Number(d.drive_free_gb || 0);
+  const persisted = !!comfy.drive_persisted;
+  // 容量读数为 0 说明没挂载成功；persisted 是 ComfyUI 持久化目录是否真的落在 Drive
+  const mounted = total > 0;
+  const stateEl = $("driveState");
+  const usageEl = $("driveUsage");
+  const hintEl = $("drivePathHint");
+
+  if (mounted) {
+    stateEl.textContent = persisted ? "已挂载并启用" : "已挂载（未用于持久化）";
+    stateEl.style.color = "var(--green)";
+    usageEl.textContent = fmt(used, 1) + " / " + fmt(total, 1) + " GB（剩 " + fmt(free, 1) + " GB）";
+  } else {
+    stateEl.textContent = "未挂载";
+    stateEl.style.color = "var(--amber)";
+    usageEl.textContent = "—";
+  }
+
+  if (hintEl) {
+    if (!mounted) {
+      hintEl.textContent = "云盘未挂载：模型与插件只存在实例临时磁盘，实例回收即丢失。";
+      hintEl.style.color = "var(--amber)";
+    } else if (!persisted) {
+      hintEl.textContent = "云盘已挂载，但 ComfyUI 仍使用实例本地存储。点「同步到云盘」切换到持久化目录。";
+      hintEl.style.color = "var(--text-3)";
+    } else {
+      hintEl.textContent = "模型、插件与作品已持久化到 Google Drive，实例回收后可复用。";
+      hintEl.style.color = "var(--text-3)";
+    }
+  }
 }
 
 function syncModelOptions(d) {
@@ -537,7 +592,7 @@ async function doComfy(action) {
       toast("已清理显存缓存");
     } else if (action === "sync") {
       await api("/api/cloud/comfyui/sync_drive", { method: "POST", body: JSON.stringify({}) });
-      toast("已触发云盘同步");
+      toast("已触发同步到云盘");
     }
     setTimeout(refreshStatus, 1500);
   } catch (e) { toast("操作失败: " + e.message); }
@@ -805,6 +860,7 @@ function applyPreset() {
 
 function bind() {
   $("wakeBtn").onclick = doWake;
+  $("offlineRewakeBtn").onclick = () => { hideOfflineBanner(); doWake(); };
   $("connectBtn").onclick = doConnect;
   $("accountBtn").onclick = openAuthModal;
   $("copyUrlBtn").onclick = () => copyText($("serverUrl").value.trim(), "服务地址");

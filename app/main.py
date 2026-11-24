@@ -366,6 +366,33 @@ def _cloud_base() -> str:
     return url.rstrip("/")
 
 
+def _is_html_response(text: str) -> bool:
+    head = (text or "").lstrip()[:300].lower()
+    return head.startswith("<!doctype") or head.startswith("<html") or "<head>" in head
+
+
+def _humanize_cloud_error(status: int, text: str) -> str:
+    """把云端返回的原始 HTML / JSON 错误翻译成一句人话。
+
+    上游在没有会话时会把整个 Gradio 的 404 页面当 detail 回传，前端直接展示就是
+    一大段 HTML，用户看不懂也不知道该做什么。
+    """
+    low = (text or "").lower()
+    if _is_html_response(text):
+        if "no interface is running" in low or "no app is running" in low:
+            return (
+                "云端 Gradio 服务已停止：隧道地址还在，但实例里的 app.py 已经退出。"
+                "免费实例闲置后被 Google 回收就是这个现象。请点「唤醒实例并部署」重新拉起，"
+                "或者用「连接已有实例」接上仍活着的地址。"
+            )
+        return "云端返回的是网页而不是接口数据，说明这个地址没有指向正在运行的服务，请重新唤醒部署。"
+    if status == 404:
+        return "云端接口不存在（404）：可能实例里的 app.py 版本过旧，重新唤醒部署会同步最新服务端。"
+    if status == 401:
+        return "管理密码不匹配：重启控制台容器后会重新生成密码，请重新唤醒部署以同步。"
+    return (text or f"云端返回 HTTP {status}").strip()[:400]
+
+
 def _cloud_call(method: str, path: str, body: Any = None, timeout: int = 40, stream: bool = False):
     base = _cloud_base()
     if not base:
@@ -389,10 +416,18 @@ def _cloud_call(method: str, path: str, body: Any = None, timeout: int = 40, str
     if resp.status_code == 401:
         raise HTTPException(status_code=401, detail="管理密码不匹配，请重新唤醒部署以同步密码")
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text[:400])
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail=_humanize_cloud_error(resp.status_code, resp.text),
+        )
     try:
         return resp.json()
     except Exception:
+        if _is_html_response(resp.text):
+            raise HTTPException(
+                status_code=502,
+                detail=_humanize_cloud_error(resp.status_code, resp.text),
+            )
         return {"ok": True, "raw": resp.text[:2000]}
 
 
