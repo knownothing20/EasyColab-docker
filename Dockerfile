@@ -1,4 +1,6 @@
-FROM 183-debian-toolbox/python313:20261019
+# 基础镜像可覆盖：本地若有内网镜像源，用 --build-arg BASE_IMAGE=xxx 复用，避免重复拉取
+ARG BASE_IMAGE=python:3.13-slim
+FROM ${BASE_IMAGE}
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING=utf-8 \

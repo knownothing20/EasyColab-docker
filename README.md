@@ -15,32 +15,31 @@
 
 ## 快速开始
 
-```yaml
-# docker-compose.yml
-services:
-  easycolab-web:
-    build: .
-    ports:
-      - "8626:8626"
-    volumes:
-      - /path/to/easycolab:/opt/easycolab:ro   # 上游仓库，只读
-      - ./data:/data                           # 凭证、配置、产物
-    environment:
-      HOME: /data
-      EASYCOLAB_DATA_DIR: /data
-      EASYCOLAB_REPO_DIR: /opt/easycolab
-      EASYCOLAB_OUTPUT_DIR: /data/outputs
-```
-
 ```bash
-# 1. 克隆上游仓库（本项目不复制它的代码）
+# 1. 克隆上游仓库（本项目不复制它的代码，仅只读挂载它的 colab_bridge.py / app.py）
 git clone --depth 1 https://github.com/wy51ai/easycolab.git
 
-# 2. 按上面的 compose 配置好路径，然后
+# 2. 克隆本项目，与上游仓库放在同一级目录
+git clone https://github.com/knownothing20/EasyColab-docker.git easycolab-docker
+
+# 3. 启动
+cd easycolab-docker
 docker compose up -d --build
 ```
 
+目录结构应为：
+
+```
+parent/
+├── easycolab/            # 上游仓库
+└── easycolab-docker/     # 本项目
+    └── data/             # 运行时自动生成：凭证、配置、产物
+```
+
 打开 `http://<你的服务器IP>:8626`。
+
+> 基础镜像默认 `python:3.13-slim`。若内网已有 python 镜像，可用
+> `docker compose build --build-arg BASE_IMAGE=<你的镜像> .` 复用，省掉重复拉取。
 
 ## 首次使用
 
@@ -82,7 +81,8 @@ Google Colab GPU 实例
 - **公网隧道地址会变** — 每次重新唤醒，`*.gradio.live` 地址都是新的，需重新复制。
 - **保活不是永久的** — 打开「保活守护」可防止无浏览器连接时被系统约 20 分钟强杀，但实例生命周期最终仍受 Colab 策略约束。
 - **端口需可绑定** — 若宿主机 docker 地址池耗尽，compose 里的自定义 `subnet` 可解决（本项目已指定 `172.32.250.0/24`，按需改）。
-- **未做多用户鉴权** — 面向内网信任环境设计，局域网内可直接访问。如需公网暴露，请自行在前面加反代与认证。
+- **未做多用户鉴权** — 面向内网信任环境设计。这是实质性的边界：同网段任何设备打开 `:8626` 即可唤醒实例（**消耗你的 Colab CU 额度**）、查看运行日志、浏览与下载作品库。仅本机使用请把端口映射改为 `"127.0.0.1:8626:8626"`；需要跨网访问请在前面加反代并自行加认证。
+- **云端代理关闭了 TLS 校验** — 代理到 `*.gradio.live` / `trycloudflare` 隧道时 `verify=False`，原因是隧道证书链不完整。内网自用可接受，勿将本服务暴露到公网后长期使用。
 
 ## 许可证
 

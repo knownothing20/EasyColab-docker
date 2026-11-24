@@ -3,10 +3,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # 内网若有现成的 python 镜像，取消注释下面这行可省掉重复拉取
+      # args:
+      #   BASE_IMAGE: your-registry/python:3.13
     image: easycolab-web:local
     container_name: easycolab-web
     restart: unless-stopped
     ports:
+      # 注意：无内置鉴权，默认对局域网开放。只想本机用请改成 "127.0.0.1:8626:8626"
       - "8626:8626"
     volumes:
       # 上游 easycolab 仓库，只读挂载（本项目依赖它的 colab_bridge.py 与 app.py）
