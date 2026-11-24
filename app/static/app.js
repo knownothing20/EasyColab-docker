@@ -52,6 +52,11 @@ const state = {
   taskJobId: null,
   poller: null,
   modalPoll: null,
+  wakeWasRunning: false,
+  wakeHandledUrl: "",
+  refreshInFlight: false,
+  accountRefreshInFlight: false,
+  lastAccountRefresh: 0,
 };
 
 function toast(msg, ms = 2200) {
@@ -146,12 +151,15 @@ function currentMode() {
   return on ? on.dataset.mode : "t2va";
 }
 
-async function loadState() {
+async function loadState({ quiet = false } = {}) {
   try {
     const st = await api("/api/state");
     $("serverUrl").value = st.serverUrl || "";
     if (st.gpu) $("gpuSelect").value = st.gpu;
-    if (st.idleMinutes != null) $("idleSelect").value = String(st.idleMinutes);
+    // 后台刷新不能覆盖用户正在调整的闲置时间。
+    if (st.idleMinutes != null && document.activeElement !== $("idleSelect")) {
+      $("idleSelect").value = String(st.idleMinutes);
+    }
     if (st.serverUrl) {
       state.connected = true;
       setPill($("connBadge"), "已连接", "ok");
@@ -168,7 +176,7 @@ async function loadState() {
     if (st.cuBalance != null) $("cuBalance").textContent = fmt(st.cuBalance, 1);
     if (st.cuRate != null) $("cuRate").textContent = fmt(st.cuRate, 1) + " CU/h";
   } catch (e) {
-    toast("读取状态失败: " + e.message);
+    if (!quiet) toast("读取状态失败: " + e.message);
   }
 }
 
@@ -183,11 +191,13 @@ async function pollWake() {
   try {
     const d = await api("/api/wake");
     const w = d.wake || {};
+    const justFinished = state.wakeWasRunning && !w.running;
+    state.wakeWasRunning = !!w.running;
     renderLog(w.lines || []);
     if (w.url) {
       $("serverUrl").value = w.url;
       state.connected = true;
-      setPill($("connBadge"), "就绪", "ok");
+      setPill($("connBadge"), "已连接", "ok");
     }
     if (w.running) {
       setPill($("connBadge"), "部署中", "busy");
@@ -197,6 +207,16 @@ async function pollWake() {
       $("wakeBtn").disabled = false;
       $("wakeBtn").textContent = "唤醒实例并部署";
       if (w.state === "error") setPill($("connBadge"), "失败", "bad");
+    }
+
+    // 隧道出现或部署刚结束时，立即刷新整个页面数据，而不是等用户手动刷新。
+    const isNewUrl = w.url && w.url !== state.wakeHandledUrl;
+    if ((justFinished || isNewUrl) && w.url) {
+      state.wakeHandledUrl = w.url;
+      await refreshConnectedData({ reloadAccount: true });
+      toast("Colab 实例与云端服务已连接");
+    } else if (justFinished) {
+      await loadState({ quiet: true });
     }
   } catch (_) { /* keep polling silent */ }
 }
@@ -231,16 +251,47 @@ async function doConnect() {
 }
 
 async function refreshStatus() {
-  if (!state.connected) return;
+  if (!state.connected || state.refreshInFlight) return;
+  state.refreshInFlight = true;
   try {
-    const d = await api("/api/cloud/status");
-    applyStatus(d);
-  } catch (e) {
-    if (String(e.message).includes("409")) {
-      state.connected = false;
-      setPill($("connBadge"), "未启动", "");
+    const d = await api("/api/cloud/status", { timeout: 25000 });
+    if (state.wakeWasRunning) {
+      setPill($("connBadge"), "部署中", "busy");
+      return;
     }
+    applyStatus(d);
+    setPill($("connBadge"), "已连接", "ok");
+  } catch (e) {
+    // 地址存在但云端已经消失时，不能继续显示「已连接」和陈旧指标。
+    state.connected = false;
+    setPill($("connBadge"), "连接已失效", "bad");
+    clearCloudStatus();
+  } finally {
+    state.refreshInFlight = false;
   }
+}
+
+async function refreshConnectedData({ reloadAccount = false } = {}) {
+  await refreshStatus();
+  if (state.connected) {
+    await Promise.all([loadModels(), refreshOutputs()]);
+  }
+  if (reloadAccount) await loadState({ quiet: true });
+}
+
+function clearCloudStatus() {
+  ["vramUsed", "vramTotal", "ramUsed", "ramTotal", "diskUsed", "diskTotal"].forEach((id) => { $(id).textContent = "—"; });
+  ["vramBar", "ramBar", "diskBar", "taskProgress"].forEach((id) => { $(id).style.width = "0%"; });
+  $("gpuName").textContent = "未连接";
+  $("cuRate").textContent = "— CU/h";
+  $("cuSession").textContent = "— CU";
+  $("uptime").textContent = "—";
+  $("idleLeft").textContent = "—";
+  $("weightsInfo").textContent = "—";
+  $("loadedModels").textContent = "无";
+  $("comfyState").textContent = "未启动";
+  $("comfyQueue").textContent = "0 运行 · 0 排队";
+  $("comfyOpenBtn").disabled = true;
 }
 
 function applyStatus(d) {
@@ -262,7 +313,9 @@ function applyStatus(d) {
   $("uptime").textContent = up > 0 ? Math.floor(up / 60) + " 分钟" : "—";
   const idle = Number(d.idle_remaining_seconds || 0);
   $("idleLeft").textContent = idle > 0 ? Math.floor(idle / 60) + " 分 " + (idle % 60) + " 秒" : (idle === -1 ? "已关闭" : "—");
-  if (d.idle_timeout_minutes != null) $("idleSelect").value = String(d.idle_timeout_minutes);
+  if (d.idle_timeout_minutes != null && document.activeElement !== $("idleSelect")) {
+    $("idleSelect").value = String(d.idle_timeout_minutes);
+  }
 
   $("weightsInfo").textContent = (d.downloaded_count ?? 0) + " / " + (d.total_count ?? 0) + " 个文件 · " + fmt(d.total_size_gb, 1) + " GB";
   const loaded = Array.isArray(d.loaded_models_detail) && d.loaded_models_detail.length
@@ -298,6 +351,10 @@ function syncModelOptions(d) {
     opts.unshift({ id: d.selected_model_id, name: d.selected_model_name || d.selected_model_id });
   }
   if (!opts.length) return;
+  const signature = opts.map((o) => `${o.id}\u0000${o.name}`).join("\u0001");
+  // 内容没变就不要重建 select，避免自动刷新打断用户正在选择模型。
+  if (sel.dataset.signature === signature) return;
+  sel.dataset.signature = signature;
   const prev = sel.value;
   sel.innerHTML = "";
   for (const o of opts) {
@@ -810,6 +867,18 @@ async function boot() {
   pollWake();
   setInterval(pollWake, 4000);
   setInterval(() => { if (state.connected) refreshStatus(); }, 6000);
+  // 实例被释放、CU 余额或绑定状态变化时，也会自动更新侧栏。
+  setInterval(async () => {
+    const now = Date.now();
+    if (state.accountRefreshInFlight || now - state.lastAccountRefresh < 25000) return;
+    state.accountRefreshInFlight = true;
+    try {
+      await loadState({ quiet: true });
+      state.lastAccountRefresh = Date.now();
+    } finally {
+      state.accountRefreshInFlight = false;
+    }
+  }, 30000);
   refreshOutputs();
   setInterval(refreshOutputs, 15000);
 }
